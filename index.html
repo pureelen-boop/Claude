@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>단어 맞추기 게임</title>
+<style>
+  :root {
+    --bg: #fdf6ec;
+    --card: #ffffff;
+    --accent: #ff6b6b;
+    --accent2: #4ecdc4;
+    --text: #2d2d2d;
+    --muted: #8a8a8a;
+    --blank: #f1c40f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #fdf6ec, #ffe8d6);
+    font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    color: var(--text);
+    padding: 20px;
+  }
+  .card {
+    background: var(--card);
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+    padding: 32px;
+    width: 100%;
+    max-width: 480px;
+    text-align: center;
+  }
+  h1 {
+    margin: 0 0 4px;
+    font-size: 26px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+  .category {
+    display: inline-block;
+    background: var(--accent2);
+    color: white;
+    padding: 4px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    margin-bottom: 18px;
+  }
+  .word-display {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 20px 0;
+  }
+  .letter-box {
+    width: 46px;
+    height: 56px;
+    border-radius: 10px;
+    background: #fff9ec;
+    border: 2px solid var(--blank);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    font-weight: bold;
+    transition: transform 0.2s ease;
+  }
+  .letter-box.revealed {
+    background: var(--accent2);
+    border-color: var(--accent2);
+    color: white;
+    transform: scale(1.05);
+  }
+  .status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 14px 0;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .hearts { font-size: 18px; letter-spacing: 2px; }
+  .input-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  input[type="text"] {
+    flex: 1;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 2px solid #eee;
+    font-size: 18px;
+    text-align: center;
+    outline: none;
+  }
+  input[type="text"]:focus { border-color: var(--accent2); }
+  button {
+    border: none;
+    border-radius: 12px;
+    padding: 12px 18px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+  button:active { opacity: 0.7; }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-secondary { background: #eee; color: var(--text); margin-top: 10px; width: 100%; }
+  .hint-text {
+    min-height: 20px;
+    font-size: 14px;
+    color: var(--accent);
+    margin-top: 10px;
+  }
+  .message {
+    font-size: 18px;
+    font-weight: bold;
+    margin: 16px 0 4px;
+    min-height: 26px;
+  }
+  .message.win { color: #2ecc71; }
+  .message.lose { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🎯 단어 맞추기</h1>
+    <div class="subtitle">한 글자씩 입력해서 숨겨진 단어를 맞혀보세요!</div>
+    <div class="category" id="category">카테고리</div>
+
+    <div class="word-display" id="wordDisplay"></div>
+
+    <div class="status-row">
+      <span>남은 기회</span>
+      <span class="hearts" id="hearts"></span>
+    </div>
+
+    <div class="input-row">
+      <input type="text" id="guessInput" maxlength="1" placeholder="글자 입력" autocomplete="off">
+      <button class="btn-primary" id="guessBtn">맞추기</button>
+    </div>
+
+    <div class="hint-text" id="hintText"></div>
+    <div class="message" id="message"></div>
+
+    <button class="btn-secondary" id="hintBtn">💡 힌트 보기</button>
+    <button class="btn-secondary" id="restartBtn">🔄 새 단어로 다시하기</button>
+  </div>
+
+<script>
+  const WORDS = [
+    { word: "사과", category: "과일", hint: "빨갛고 아삭한 과일" },
+    { word: "바나나", category: "과일", hint: "노랗고 길쭉한 과일" },
+    { word: "호랑이", category: "동물", hint: "숲속의 왕, 줄무늬가 있어요" },
+    { word: "코끼리", category: "동물", hint: "코가 아주 긴 큰 동물" },
+    { word: "무지개", category: "자연", hint: "비 온 뒤 하늘에 뜨는 일곱 빛깔" },
+    { word: "피아노", category: "악기", hint: "건반을 눌러 소리를 내는 악기" },
+    { word: "자전거", category: "물건", hint: "두 바퀴로 페달을 밟아 타는 것" },
+    { word: "대한민국", category: "나라", hint: "우리가 살고 있는 나라" },
+    { word: "눈사람", category: "겨울", hint: "겨울에 눈으로 만드는 사람 모양" },
+    { word: "고양이", category: "동물", hint: "야옹 하고 우는 반려동물" },
+    { word: "축구공", category: "스포츠", hint: "발로 차는 둥근 공" },
+    { word: "김치찌개", category: "음식", hint: "매콤하고 얼큰한 한국 찌개" },
+  ];
+
+  const MAX_LIVES = 6;
+
+  let current, guessedChars, lives, hintUsed;
+
+  const wordDisplay = document.getElementById("wordDisplay");
+  const categoryEl = document.getElementById("category");
+  const heartsEl = document.getElementById("hearts");
+  const guessInput = document.getElementById("guessInput");
+  const guessBtn = document.getElementById("guessBtn");
+  const hintBtn = document.getElementById("hintBtn");
+  const restartBtn = document.getElementById("restartBtn");
+  const hintText = document.getElementById("hintText");
+  const messageEl = document.getElementById("message");
+
+  function startGame() {
+    current = WORDS[Math.floor(Math.random() * WORDS.length)];
+    guessedChars = new Set();
+    lives = MAX_LIVES;
+    hintUsed = false;
+    hintText.textContent = "";
+    messageEl.textContent = "";
+    messageEl.className = "message";
+    categoryEl.textContent = current.category;
+    guessInput.disabled = false;
+    guessBtn.disabled = false;
+    guessInput.value = "";
+    render();
+    guessInput.focus();
+  }
+
+  function render() {
+    wordDisplay.innerHTML = "";
+    for (const ch of current.word) {
+      const box = document.createElement("div");
+      box.className = "letter-box";
+      if (guessedChars.has(ch)) {
+        box.textContent = ch;
+        box.classList.add("revealed");
+      } else {
+        box.textContent = "";
+      }
+      wordDisplay.appendChild(box);
+    }
+    heartsEl.textContent = "❤️".repeat(lives) + "🖤".repeat(MAX_LIVES - lives);
+  }
+
+  function isWordComplete() {
+    return [...current.word].every(ch => guessedChars.has(ch));
+  }
+
+  function endGame(won) {
+    guessInput.disabled = true;
+    guessBtn.disabled = true;
+    if (won) {
+      messageEl.textContent = "🎉 정답입니다! 축하해요!";
+      messageEl.className = "message win";
+    } else {
+      messageEl.textContent = `😢 아쉬워요! 정답은 "${current.word}" 였어요.`;
+      messageEl.className = "message lose";
+      guessedChars = new Set(current.word);
+      render();
+    }
+  }
+
+  function handleGuess() {
+    const ch = guessInput.value.trim();
+    guessInput.value = "";
+    guessInput.focus();
+    if (!ch) return;
+
+    if (guessedChars.has(ch)) {
+      hintText.textContent = "이미 입력한 글자예요!";
+      return;
+    }
+
+    if (current.word.includes(ch)) {
+      guessedChars.add(ch);
+      hintText.textContent = "정답 글자예요! 👍";
+      render();
+      if (isWordComplete()) endGame(true);
+    } else {
+      lives -= 1;
+      hintText.textContent = "틀렸어요! 다시 시도해보세요.";
+      render();
+      if (lives <= 0) endGame(false);
+    }
+  }
+
+  guessBtn.addEventListener("click", handleGuess);
+  guessInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") handleGuess();
+  });
+  hintBtn.addEventListener("click", () => {
+    if (!hintUsed) {
+      hintText.textContent = "💡 힌트: " + current.hint;
+      hintUsed = true;
+    } else {
+      hintText.textContent = "💡 힌트: " + current.hint;
+    }
+  });
+  restartBtn.addEventListener("click", startGame);
+
+  startGame();
+</script>
+</body>
+</html>
