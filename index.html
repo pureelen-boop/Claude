@@ -3,157 +3,265 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>단어 맞추기 게임</title>
+<title>칠판 단어 맞추기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&family=Gowun+Dodum&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #fdf6ec;
-    --card: #ffffff;
-    --accent: #ff6b6b;
-    --accent2: #4ecdc4;
-    --text: #2d2d2d;
-    --muted: #8a8a8a;
-    --blank: #f1c40f;
+    --wall: #3a2f28;
+    --wall-shadow: #2a221c;
+    --board: #23402f;
+    --board-edge: #1a3123;
+    --frame: #6b4a34;
+    --frame-dark: #4a3324;
+    --chalk: #f4f1e6;
+    --chalk-dim: #9fb3a4;
+    --chalk-yellow: #f2c94c;
+    --chalk-coral: #e8737a;
   }
+
   * { box-sizing: border-box; }
+
   body {
     margin: 0;
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #fdf6ec, #ffe8d6);
-    font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-    color: var(--text);
-    padding: 20px;
+    padding: 28px 16px;
+    background:
+      radial-gradient(ellipse at 50% -10%, #4a3c32 0%, var(--wall) 55%, var(--wall-shadow) 100%);
+    font-family: "Gowun Dodum", -apple-system, "Malgun Gothic", sans-serif;
+    color: var(--chalk);
   }
-  .card {
-    background: var(--card);
-    border-radius: 20px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.12);
-    padding: 32px;
+
+  .frame {
+    background: linear-gradient(155deg, var(--frame), var(--frame-dark));
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow:
+      0 24px 50px rgba(0,0,0,0.45),
+      inset 0 0 0 1px rgba(255,255,255,0.06);
     width: 100%;
     max-width: 480px;
+  }
+
+  .board {
+    background:
+      radial-gradient(ellipse at 20% 10%, rgba(255,255,255,0.05), transparent 60%),
+      radial-gradient(ellipse at 80% 90%, rgba(255,255,255,0.04), transparent 55%),
+      var(--board);
+    border: 2px solid var(--board-edge);
+    border-radius: 8px;
+    padding: 28px 24px 22px;
     text-align: center;
+    position: relative;
   }
+
   h1 {
-    margin: 0 0 4px;
-    font-size: 26px;
+    font-family: "Gaegu", cursive;
+    font-weight: 700;
+    font-size: 30px;
+    margin: 0 0 2px;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 14px rgba(244,241,230,0.25);
   }
+
   .subtitle {
-    color: var(--muted);
-    font-size: 14px;
-    margin-bottom: 20px;
+    font-size: 13px;
+    color: var(--chalk-dim);
+    margin-bottom: 14px;
   }
+
   .category {
     display: inline-block;
-    background: var(--accent2);
-    color: white;
-    padding: 4px 14px;
-    border-radius: 999px;
-    font-size: 13px;
+    font-family: "Gaegu", cursive;
+    font-size: 16px;
+    color: var(--chalk-yellow);
+    border-bottom: 2px dashed var(--chalk-yellow);
+    padding-bottom: 2px;
     margin-bottom: 18px;
   }
+
+  /* --- hangman doodle --- */
+  .doodle-wrap {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 6px;
+  }
+  .doodle-wrap svg {
+    width: 92px;
+    height: 92px;
+  }
+  .doodle-wrap svg .fixed {
+    stroke: var(--chalk-dim);
+  }
+  .doodle-wrap svg .part {
+    stroke: var(--chalk);
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+  .doodle-wrap svg .part.show {
+    opacity: 1;
+  }
+  .doodle-wrap svg line,
+  .doodle-wrap svg circle {
+    fill: none;
+    stroke-width: 3.5;
+    stroke-linecap: round;
+  }
+
   .word-display {
     display: flex;
     justify-content: center;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
-    margin: 20px 0;
+    margin: 10px 0 18px;
   }
+
   .letter-box {
-    width: 46px;
-    height: 56px;
-    border-radius: 10px;
-    background: #fff9ec;
-    border: 2px solid var(--blank);
+    width: 42px;
+    height: 52px;
+    border-bottom: 3px dashed var(--chalk-dim);
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: center;
-    font-size: 24px;
-    font-weight: bold;
-    transition: transform 0.2s ease;
+    padding-bottom: 4px;
+    font-family: "Gaegu", cursive;
+    font-size: 26px;
+    font-weight: 700;
+    color: transparent;
+    transition: color 0.25s ease, border-color 0.25s ease;
   }
+
   .letter-box.revealed {
-    background: var(--accent2);
-    border-color: var(--accent2);
-    color: white;
-    transform: scale(1.05);
+    color: var(--chalk-yellow);
+    border-color: var(--chalk-yellow);
+    text-shadow: 0 0 10px rgba(242,201,76,0.35);
   }
-  .status-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin: 14px 0;
-    font-size: 14px;
-    color: var(--muted);
-  }
-  .hearts { font-size: 18px; letter-spacing: 2px; }
+
   .input-row {
     display: flex;
-    gap: 8px;
-    margin-top: 10px;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 4px;
   }
+
   input[type="text"] {
-    flex: 1;
-    padding: 12px 14px;
-    border-radius: 12px;
-    border: 2px solid #eee;
-    font-size: 18px;
+    width: 76px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid var(--chalk-dim);
+    font-family: "Gaegu", cursive;
+    font-size: 22px;
+    color: var(--chalk);
     text-align: center;
+    padding: 6px 4px;
     outline: none;
   }
-  input[type="text"]:focus { border-color: var(--accent2); }
+  input[type="text"]:focus {
+    border-color: var(--chalk-yellow);
+  }
+  input[type="text"]::placeholder {
+    color: var(--chalk-dim);
+    font-size: 13px;
+    font-family: "Gowun Dodum", sans-serif;
+  }
+
   button {
-    border: none;
-    border-radius: 12px;
-    padding: 12px 18px;
-    font-size: 16px;
-    font-weight: bold;
+    font-family: "Gaegu", cursive;
+    font-size: 17px;
+    font-weight: 700;
+    background: transparent;
+    color: var(--chalk);
+    border: 2px solid var(--chalk-dim);
+    border-radius: 6px;
+    padding: 9px 16px;
     cursor: pointer;
-    transition: opacity 0.15s ease;
+    transition: border-color 0.2s ease, color 0.2s ease, transform 0.1s ease;
   }
-  button:active { opacity: 0.7; }
-  .btn-primary { background: var(--accent); color: white; }
-  .btn-secondary { background: #eee; color: var(--text); margin-top: 10px; width: 100%; }
+  button:hover { border-color: var(--chalk); }
+  button:active { transform: scale(0.96); }
+  button:focus-visible {
+    outline: 2px solid var(--chalk-yellow);
+    outline-offset: 2px;
+  }
+  button:disabled { opacity: 0.4; cursor: default; }
+
+  .btn-primary {
+    border-color: var(--chalk-yellow);
+    color: var(--chalk-yellow);
+  }
+  .btn-primary:hover { border-color: var(--chalk-yellow); box-shadow: 0 0 10px rgba(242,201,76,0.25); }
+
+  .secondary-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+  }
+  .secondary-row button { flex: 1; font-size: 14px; padding: 9px 8px; }
+
   .hint-text {
-    min-height: 20px;
-    font-size: 14px;
-    color: var(--accent);
-    margin-top: 10px;
+    min-height: 18px;
+    font-size: 13px;
+    color: var(--chalk-yellow);
+    margin-top: 12px;
   }
+
   .message {
-    font-size: 18px;
-    font-weight: bold;
-    margin: 16px 0 4px;
+    font-family: "Gaegu", cursive;
+    font-size: 19px;
+    font-weight: 700;
+    margin: 4px 0 0;
     min-height: 26px;
   }
-  .message.win { color: #2ecc71; }
-  .message.lose { color: var(--accent); }
+  .message.win { color: var(--chalk-yellow); }
+  .message.lose { color: var(--chalk-coral); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
 </style>
 </head>
 <body>
-  <div class="card">
-    <h1>🎯 단어 맞추기</h1>
-    <div class="subtitle">한 글자씩 입력해서 숨겨진 단어를 맞혀보세요!</div>
-    <div class="category" id="category">카테고리</div>
+  <div class="frame">
+    <div class="board">
+      <h1>단어 맞추기</h1>
+      <div class="subtitle">칠판에 숨겨진 단어를 한 글자씩 맞혀보세요</div>
+      <div class="category" id="category">카테고리</div>
 
-    <div class="word-display" id="wordDisplay"></div>
+      <div class="doodle-wrap" aria-hidden="true">
+        <svg viewBox="0 0 100 100">
+          <line class="fixed" x1="15" y1="90" x2="70" y2="90"></line>
+          <line class="fixed" x1="30" y1="90" x2="30" y2="12"></line>
+          <line class="fixed" x1="30" y1="12" x2="65" y2="12"></line>
+          <line class="fixed" x1="65" y1="12" x2="65" y2="24"></line>
+          <circle class="part" id="p-head" cx="65" cy="34" r="10"></circle>
+          <line class="part" id="p-torso" x1="65" y1="44" x2="65" y2="68"></line>
+          <line class="part" id="p-armL" x1="65" y1="50" x2="53" y2="60"></line>
+          <line class="part" id="p-armR" x1="65" y1="50" x2="77" y2="60"></line>
+          <line class="part" id="p-legL" x1="65" y1="68" x2="55" y2="84"></line>
+          <line class="part" id="p-legR" x1="65" y1="68" x2="75" y2="84"></line>
+        </svg>
+      </div>
 
-    <div class="status-row">
-      <span>남은 기회</span>
-      <span class="hearts" id="hearts"></span>
+      <div class="word-display" id="wordDisplay"></div>
+
+      <div class="input-row">
+        <input type="text" id="guessInput" maxlength="1" placeholder="글자" autocomplete="off" aria-label="글자 입력">
+        <button class="btn-primary" id="guessBtn">맞추기</button>
+      </div>
+
+      <div class="hint-text" id="hintText">&nbsp;</div>
+      <div class="message" id="message"></div>
+
+      <div class="secondary-row">
+        <button id="hintBtn">힌트 보기</button>
+        <button id="restartBtn">새 단어로</button>
+      </div>
     </div>
-
-    <div class="input-row">
-      <input type="text" id="guessInput" maxlength="1" placeholder="글자 입력" autocomplete="off">
-      <button class="btn-primary" id="guessBtn">맞추기</button>
-    </div>
-
-    <div class="hint-text" id="hintText"></div>
-    <div class="message" id="message"></div>
-
-    <button class="btn-secondary" id="hintBtn">💡 힌트 보기</button>
-    <button class="btn-secondary" id="restartBtn">🔄 새 단어로 다시하기</button>
   </div>
 
 <script>
@@ -172,13 +280,13 @@
     { word: "김치찌개", category: "음식", hint: "매콤하고 얼큰한 한국 찌개" },
   ];
 
-  const MAX_LIVES = 6;
+  const PARTS = ["p-head", "p-torso", "p-armL", "p-armR", "p-legL", "p-legR"];
+  const MAX_LIVES = PARTS.length;
 
   let current, guessedChars, lives, hintUsed;
 
   const wordDisplay = document.getElementById("wordDisplay");
   const categoryEl = document.getElementById("category");
-  const heartsEl = document.getElementById("hearts");
   const guessInput = document.getElementById("guessInput");
   const guessBtn = document.getElementById("guessBtn");
   const hintBtn = document.getElementById("hintBtn");
@@ -191,13 +299,14 @@
     guessedChars = new Set();
     lives = MAX_LIVES;
     hintUsed = false;
-    hintText.textContent = "";
+    hintText.innerHTML = "&nbsp;";
     messageEl.textContent = "";
     messageEl.className = "message";
     categoryEl.textContent = current.category;
     guessInput.disabled = false;
     guessBtn.disabled = false;
     guessInput.value = "";
+    PARTS.forEach(id => document.getElementById(id).classList.remove("show"));
     render();
     guessInput.focus();
   }
@@ -211,11 +320,14 @@
         box.textContent = ch;
         box.classList.add("revealed");
       } else {
-        box.textContent = "";
+        box.textContent = "?";
       }
       wordDisplay.appendChild(box);
     }
-    heartsEl.textContent = "❤️".repeat(lives) + "🖤".repeat(MAX_LIVES - lives);
+    const wrongCount = MAX_LIVES - lives;
+    PARTS.forEach((id, i) => {
+      document.getElementById(id).classList.toggle("show", i < wrongCount);
+    });
   }
 
   function isWordComplete() {
@@ -226,10 +338,10 @@
     guessInput.disabled = true;
     guessBtn.disabled = true;
     if (won) {
-      messageEl.textContent = "🎉 정답입니다! 축하해요!";
+      messageEl.textContent = "정답입니다! 잘했어요.";
       messageEl.className = "message win";
     } else {
-      messageEl.textContent = `😢 아쉬워요! 정답은 "${current.word}" 였어요.`;
+      messageEl.textContent = `아쉬워요! 정답은 "${current.word}" 였어요.`;
       messageEl.className = "message lose";
       guessedChars = new Set(current.word);
       render();
@@ -243,18 +355,18 @@
     if (!ch) return;
 
     if (guessedChars.has(ch)) {
-      hintText.textContent = "이미 입력한 글자예요!";
+      hintText.textContent = "이미 입력한 글자예요.";
       return;
     }
 
     if (current.word.includes(ch)) {
       guessedChars.add(ch);
-      hintText.textContent = "정답 글자예요! 👍";
+      hintText.innerHTML = "&nbsp;";
       render();
       if (isWordComplete()) endGame(true);
     } else {
       lives -= 1;
-      hintText.textContent = "틀렸어요! 다시 시도해보세요.";
+      hintText.textContent = "틀렸어요, 다시 시도해보세요.";
       render();
       if (lives <= 0) endGame(false);
     }
@@ -265,12 +377,8 @@
     if (e.key === "Enter") handleGuess();
   });
   hintBtn.addEventListener("click", () => {
-    if (!hintUsed) {
-      hintText.textContent = "💡 힌트: " + current.hint;
-      hintUsed = true;
-    } else {
-      hintText.textContent = "💡 힌트: " + current.hint;
-    }
+    hintText.textContent = "힌트: " + current.hint;
+    hintUsed = true;
   });
   restartBtn.addEventListener("click", startGame);
 
