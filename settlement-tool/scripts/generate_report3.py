@@ -13,6 +13,7 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
+from openpyxl.formatting.rule import FormulaRule
 
 THIN = Side(style="thin", color="000000")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
@@ -21,22 +22,45 @@ BODY_FONT = Font(name="맑은 고딕", size=10)
 NOTICE_FONT = Font(name="맑은 고딕", bold=True, color="FF0000", size=10)
 INPUT_FONT = Font(name="맑은 고딕", bold=True, size=11, color="1155CC")
 INPUT_FILL = PatternFill("solid", fgColor="FFF2CC")
-YELLOW = PatternFill("solid", fgColor="FFFF00")
 CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
 NUM_FMT = '#,##0;-#,##0;"-"'
+
+# 공급업체~매입금액을 붙여넣을 때 헷갈리지 않도록, 열 그룹마다 다른 연한
+# 파스텔 색을 준다 (번호·업체명·구분 / 면세금액 / 과세금액(공급가액·부가세·
+# 합계) / 매입금액). 헤더·데이터·소계 행 전부 같은 색 띠를 유지한다.
+FILL_VENDOR = PatternFill("solid", fgColor="F2F2F2")    # 번호/업체명/구분 - 연회색
+FILL_TAXFREE = PatternFill("solid", fgColor="E2EFDA")   # 면세금액 - 연녹색
+FILL_TAXED = PatternFill("solid", fgColor="DDEBF7")     # 과세금액(공급가액/부가세/합계) - 연파랑
+FILL_TOTAL = PatternFill("solid", fgColor="FFF2CC")     # 매입금액 - 연노랑
+
+
+def col_fill(col):
+    if col in (1, 2, 3):
+        return FILL_VENDOR
+    if col == 4:
+        return FILL_TAXFREE
+    if col in (5, 6, 7):
+        return FILL_TAXED
+    return FILL_TOTAL
 
 BLOCK_HEIGHT = 7  # 헤더2 + 안내문구1 + 데이터1 + 공백1 + 소계1 + 여백1
 DATE_CELL = "B1"
 CEO_CELL = "B2"
-DATA_START_ROW = 5
+CHECK_R3_CELL = "E5"   # 결과물3 안 소계 매입금액들의 합 (수식)
+CHECK_R1_CELL = "E6"   # 결과물1 총지급예정액계 총계 (하이포스 합계행 값)
+CHECK_DIFF_CELL = "E7"
+CHECK_RESULT_CELL = "E8"
+DATA_START_ROW = 11
 
 
 def load_report1(path):
-    df = pd.read_excel(path)
+    raw = pd.read_excel(path)
     # 결과물1 맨 마지막 행은 하이포스가 붙이는 합계행(사업자번호가 비어있고
-    # 거래처명 칸에 업체 수 숫자만 들어있다) — 실제 공급업체가 아니므로 제외.
-    df = df[df["사업자번호"].notna()]
-    return df[["거래처명", "면세지급액", "과세공급가액", "부가세", "과세지급액", "총지급예정액계"]]
+    # 거래처명 칸에 업체 수 숫자만 들어있다). 이 행의 총지급예정액계가
+    # "진짜 총계"이므로 따로 떼어둔 다음, 업체 목록에서는 제외한다.
+    grand_total = raw.loc[raw["사업자번호"].isna(), "총지급예정액계"].sum()
+    df = raw[raw["사업자번호"].notna()]
+    return df[["거래처명", "면세지급액", "과세공급가액", "부가세", "과세지급액", "총지급예정액계"]], grand_total
 
 
 def style_range(ws, cell_range, border=True):
@@ -73,6 +97,49 @@ def write_input_header(ws):
     note.font = Font(name="맑은 고딕", italic=True, size=9, color="666666")
 
 
+def write_check_section(ws, subtotal_rows, grand_total):
+    """아래 업체 블록들의 소계 매입금액 합과, 결과물1(전산원본) 합계행의
+    총지급예정액계가 서로 맞는지 한눈에 보이는 검산 섹션을 상단에 둔다."""
+    labels = [
+        ("결과물3 합계 (소계 매입금액 합)", CHECK_R3_CELL,
+         "=" + "+".join(f"H{r}" for r in subtotal_rows) if subtotal_rows else "=0"),
+        ("결과물1 총계 (전산원본 합계행)", CHECK_R1_CELL, grand_total),
+        ("차이", CHECK_DIFF_CELL, f"={CHECK_R3_CELL}-{CHECK_R1_CELL}"),
+        ("검산 결과", CHECK_RESULT_CELL, f'=IF({CHECK_DIFF_CELL}=0,"일치","불일치 - 확인 필요")'),
+    ]
+    for i, (label, cell_ref, value) in enumerate(labels):
+        row = 5 + i
+        label_cell = ws.cell(row=row, column=1, value=label)
+        label_cell.font = HEADER_FONT
+        label_cell.alignment = Alignment(horizontal="left")
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=4)
+
+        val_cell = ws[cell_ref]
+        val_cell.value = value
+        val_cell.font = Font(name="맑은 고딕", bold=True, size=11)
+        val_cell.alignment = Alignment(horizontal="center")
+        if cell_ref != CHECK_RESULT_CELL:
+            val_cell.number_format = NUM_FMT
+        ws.merge_cells(start_row=row, start_column=5, end_row=row, end_column=8)
+        for c in range(1, 9):
+            ws.cell(row=row, column=c).border = BORDER
+
+    ws.conditional_formatting.add(
+        CHECK_RESULT_CELL,
+        FormulaRule(formula=[f'{CHECK_RESULT_CELL}="일치"'], fill=PatternFill("solid", fgColor="C6EFCE"),
+                    font=Font(color="1B6B34", bold=True)),
+    )
+    ws.conditional_formatting.add(
+        CHECK_RESULT_CELL,
+        FormulaRule(formula=[f'{CHECK_RESULT_CELL}<>"일치"'], fill=PatternFill("solid", fgColor="FFC7CE"),
+                    font=Font(color="9C0006", bold=True)),
+    )
+
+    note = ws.cell(row=9, column=1,
+                    value="※ 아래 업체별 소계를 전부 더한 값이 전산원본 합계행과 다르면, 업체가 빠졌거나 중복됐다는 뜻입니다.")
+    note.font = Font(name="맑은 고딕", italic=True, size=9, color="666666")
+
+
 def build_block(ws, start_row, seq, vendor_row):
     r = start_row
     name = vendor_row["거래처명"]
@@ -101,9 +168,11 @@ def build_block(ws, start_row, seq, vendor_row):
         cell = ws.cell(row=r, column=c)
         cell.font = HEADER_FONT
         cell.alignment = CENTER
+        cell.fill = col_fill(c)
         cell2 = ws.cell(row=r + 1, column=c)
         cell2.font = HEADER_FONT
         cell2.alignment = CENTER
+        cell2.fill = col_fill(c)
 
     # 안내문구 (수식으로 작성일자/대표자명 반영)
     notice_row = r + 2
@@ -128,6 +197,7 @@ def build_block(ws, start_row, seq, vendor_row):
     for c in range(1, 9):
         cell = ws.cell(row=data_row, column=c)
         cell.font = BODY_FONT
+        cell.fill = col_fill(c)
         if c >= 4:
             cell.number_format = NUM_FMT
             cell.alignment = Alignment(horizontal="right")
@@ -149,20 +219,19 @@ def build_block(ws, start_row, seq, vendor_row):
     for c in range(1, 9):
         cell = ws.cell(row=subtotal_row, column=c)
         cell.font = HEADER_FONT
+        cell.fill = col_fill(c)
         if c >= 4:
             cell.number_format = NUM_FMT
             cell.alignment = Alignment(horizontal="right")
         else:
             cell.alignment = CENTER
-    for c in range(4, 9):
-        ws.cell(row=subtotal_row, column=c).fill = YELLOW
 
     style_range(ws, f"A{r}:H{subtotal_row}")
 
-    return r + BLOCK_HEIGHT
+    return r + BLOCK_HEIGHT, subtotal_row
 
 
-def build_report3(df, out_path):
+def build_report3(df, grand_total, out_path):
     wb = Workbook()
     ws = wb.active
     ws.title = "세금계산서 요청"
@@ -175,11 +244,15 @@ def build_report3(df, out_path):
 
     row = DATA_START_ROW
     seq = 1
+    subtotal_rows = []
     for _, vendor_row in df.iterrows():
         if pd.isna(vendor_row["거래처명"]):
             continue
-        row = build_block(ws, row, seq, vendor_row)
+        row, subtotal_row = build_block(ws, row, seq, vendor_row)
+        subtotal_rows.append(subtotal_row)
         seq += 1
+
+    write_check_section(ws, subtotal_rows, grand_total)
 
     wb.save(out_path)
     print(f"결과물3 생성 완료: {out_path} ({seq - 1}개 업체 블록)")
@@ -187,5 +260,5 @@ def build_report3(df, out_path):
 
 if __name__ == "__main__":
     src, out = sys.argv[1], sys.argv[2]
-    df = load_report1(src)
-    build_report3(df, out)
+    df, grand_total = load_report1(src)
+    build_report3(df, grand_total, out)
