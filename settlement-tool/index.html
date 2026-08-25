@@ -870,32 +870,45 @@ window.__KOR_B64="H4sICDg381wAA2tvci50cmFpbmVkZGF0YQDE/YWXJMeRB44XdzUzw/RMDzPtLG
     ocrProgressLabel.textContent = label || (done + " / " + total + " 처리 중...");
   }
 
-  async function base64ToBytesFast(b64) {
-    // atob()+charCodeAt in a JS loop blocks the main thread for several
-    // seconds on multi-MB strings. Routing it through fetch() on a data: URL
-    // lets the browser's native (non-JS) base64 decoder do the work instead.
-    var res = await fetch("data:application/octet-stream;base64," + b64);
-    return new Uint8Array(await res.arrayBuffer());
+  function base64ToUint8Array(b64) {
+    var binary = atob(b64);
+    var len = binary.length;
+    var bytes = new Uint8Array(len);
+    for (var i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
   }
 
   async function getOcrWorker() {
     if (tesseractWorker) return tesseractWorker;
     if (typeof Tesseract === "undefined") throw new Error("OCR 엔진을 불러오지 못했어요.");
 
-    var decoded = await Promise.all([
-      base64ToBytesFast(window.__CORE_B64),
-      base64ToBytesFast(window.__WORKER_B64),
-    ]);
-    var coreBytes = decoded[0];
-    var workerBytes = decoded[1];
+    // 워커 스크립트(작아서 메인 스레드에서 바로 디코딩)만 여기서 풀고,
+    // 훨씬 큰 core wasm(5MB)과 한글 언어 데이터(1.5MB)는 base64 문자열
+    // 그대로 워커 안에 심어서 워커 자신이 풀게 한다. 이렇게 하면
+    // (1) 화면이 멈추지 않고 (2) fetch()를 전혀 쓰지 않아서 아티팩트의
+    // 네트워크 정책(CSP)에도 걸리지 않는다.
+    var workerBytes = base64ToUint8Array(window.__WORKER_B64);
+    var workerText = new TextDecoder("utf-8").decode(workerBytes);
 
-    var coreURL = URL.createObjectURL(new Blob([coreBytes], { type: "text/javascript" })) + "#.js";
-
-    // 워커 스크립트 앞에 fetch()를 가로채는 코드를 붙여서, 한글 언어 데이터를
-    // 네트워크 요청 없이 내장된 바이트로 바로 응답하게 만든다.
     var patch =
-      "var __KOR_BYTES=(function(){var s=atob('" + window.__KOR_B64 + "');var l=s.length;var b=new Uint8Array(l);" +
-      "for(var i=0;i<l;i++){b[i]=s.charCodeAt(i);}return b;})();" +
+      "function __b64ToBytes(b64){var s=atob(b64);var l=s.length;var b=new Uint8Array(l);" +
+      "for(var i=0;i<l;i++){b[i]=s.charCodeAt(i);}return b;}" +
+      "var __coreBlobURL=null;" +
+      "var __origImportScripts=self.importScripts.bind(self);" +
+      "self.importScripts=function(){" +
+      "  var args=Array.prototype.slice.call(arguments).map(function(u){" +
+      "    if(typeof u==='string'&&u.indexOf('__CORE_PLACEHOLDER__')!==-1){" +
+      "      if(!__coreBlobURL){" +
+      "        var bytes=__b64ToBytes('" + window.__CORE_B64 + "');" +
+      "        __coreBlobURL=URL.createObjectURL(new Blob([bytes],{type:'text/javascript'}))+'#.js';" +
+      "      }" +
+      "      return __coreBlobURL;" +
+      "    }" +
+      "    return u;" +
+      "  });" +
+      "  return __origImportScripts.apply(self,args);" +
+      "};" +
+      "var __KOR_BYTES=__b64ToBytes('" + window.__KOR_B64 + "');" +
       "var __origFetch=self.fetch?self.fetch.bind(self):null;" +
       "self.fetch=function(url,opts){" +
       "  if(typeof url==='string'&&url.indexOf('kor.traineddata')!==-1){" +
@@ -903,12 +916,11 @@ window.__KOR_B64="H4sICDg381wAA2tvci50cmFpbmVkZGF0YQDE/YWXJMeRB44XdzUzw/RMDzPtLG
       "  }" +
       "  return __origFetch(url,opts);" +
       "};";
-    var workerText = new TextDecoder("utf-8").decode(workerBytes);
     var workerURL = URL.createObjectURL(new Blob([patch, workerText], { type: "text/javascript" }));
 
     tesseractWorker = await Tesseract.createWorker("kor", 1, {
       workerPath: workerURL,
-      corePath: coreURL,
+      corePath: "__CORE_PLACEHOLDER__.js",
       langPath: "embedded/",
       cacheMethod: "none",
       gzip: true,
