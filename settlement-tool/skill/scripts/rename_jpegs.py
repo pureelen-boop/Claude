@@ -27,6 +27,11 @@ SOURCE_SHEET = "수수료매출내역(거래처별)"
 MATCH_FIELDS = ["면세지급액", "과세공급가액", "부가세", "과세지급액", "총지급예정액계", "순매출금액", "매출수수료"]
 FOOTER_RE = re.compile(r"공급자\s*\(?\s*출\s*하\s*자\s*\)?\s*[:：]?\s*(.+?)\s*\(?\s*인\s*\)?\s*$")
 NUM_RE = re.compile(r"\d[\d,]{2,}")
+# 출하내역서 상단 "매출기간 : 2026년07월01일 ~ 2026년07월31일" 문구에서
+# 종료일을 뽑는다. --date를 안 주면 이 종료일을 작성일자로 자동 사용한다.
+DATE_RANGE_RE = re.compile(
+    r"(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*~\s*(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일"
+)
 
 
 def to_number(v):
@@ -91,6 +96,15 @@ def extract_footer_name(text):
     return None
 
 
+def extract_end_date(text):
+    """'매출기간 : YYYY년MM월DD일 ~ YYYY년MM월DD일'에서 종료일(월,일)을
+    뽑는다. 관례상 결과물3의 작성일자 = 매출기간 종료일."""
+    m = DATE_RANGE_RE.search(text)
+    if not m:
+        return None
+    return int(m.group(5)), int(m.group(6))
+
+
 def extract_numbers(text):
     nums = set()
     for m in NUM_RE.finditer(text):
@@ -137,10 +151,7 @@ def build_filename(seq, page, page_count, month, vendor):
 
 def main(xls_path, zip_path, out_zip_path, date_str=None):
     vendors = load_vendors(xls_path)
-    month = parse_month(date_str)
-    print(f"전산원본에서 업체 {len(vendors)}곳 로드" + (f" (작성월: {month}월)" if month else ""))
-    if not month:
-        print("경고: --date 를 안 줘서(또는 월을 못 읽어서) 파일명에 'N월'이 안 붙습니다.")
+    print(f"전산원본에서 업체 {len(vendors)}곳 로드")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
@@ -163,7 +174,30 @@ def main(xls_path, zip_path, out_zip_path, date_str=None):
             recognized.append({
                 "order": i, "src": src, "orig_base": orig_base,
                 "vendor": vendor, "seq": seq, "confirmed": confirmed, "reason": reason,
+                "date_detected": extract_end_date(text),
             })
+
+        # 작성일자 결정: --date를 줬으면 그대로 쓰고, 안 줬으면 스캔들의
+        # "매출기간" 종료일을 다수결로 자동 인식한다.
+        if date_str:
+            month = parse_month(date_str)
+            dm = re.search(r"(\d{1,2})\s*일", date_str)
+            day = int(dm.group(1)) if dm else None
+            print(f"작성일자: {date_str} (직접 지정)")
+        else:
+            detected = [r["date_detected"] for r in recognized if r["date_detected"]]
+            if detected:
+                from collections import Counter
+                (month, day), n = Counter(detected).most_common(1)[0]
+                print(f"작성일자 자동 감지: {month}월 {day}일 "
+                      f"(출하내역서 '매출기간' 종료일 기준, {n}/{len(detected)}장에서 인식)")
+                if len(set(detected)) > 1:
+                    print(f"  주의: 스캔들의 매출기간이 서로 다르게 인식됐습니다 {sorted(set(detected))} "
+                          f"— 가장 많이 나온 값을 썼습니다. 결과가 이상하면 --date로 직접 지정하세요.")
+            else:
+                month, day = None, None
+                print("경고: 출하내역서에서 '매출기간'을 인식하지 못해 작성일자를 자동으로 못 정했습니다. "
+                      "--date를 직접 지정해주세요 (파일명에 'N월'도 안 붙습니다).")
 
         # 2차: 확정된 것들은 업체별로 묶어서 9-1/9-2 번호를 매긴다.
         confirmed_by_vendor = {}
@@ -204,6 +238,8 @@ def main(xls_path, zip_path, out_zip_path, date_str=None):
     print(f"완료: 확정 {confirmed_n}장 / 확인 필요 {len(report_rows) - confirmed_n}장")
     print(f"zip: {out_zip_path}")
     print(f"매칭결과표: {report_path}")
+    if month and day:
+        print(f"작성일자(최종): {month}월 {day}일  # 결과물3 생성 시 이 값을 그대로 넘기세요")
 
 
 if __name__ == "__main__":

@@ -70,11 +70,11 @@ def style_range(ws, cell_range, border=True):
                 cell.border = BORDER
 
 
-def write_input_header(ws):
+def write_input_header(ws, date_str=None, ceo_name=None):
     ws["A1"] = "작성일자"
     ws["A1"].font = HEADER_FONT
     ws["A1"].alignment = CENTER
-    ws[DATE_CELL] = "7월 31일"
+    ws[DATE_CELL] = date_str or "7월 31일"
     ws[DATE_CELL].font = INPUT_FONT
     ws[DATE_CELL].fill = INPUT_FILL
     ws[DATE_CELL].alignment = Alignment(horizontal="center")
@@ -82,7 +82,7 @@ def write_input_header(ws):
     ws["A2"] = "직매장 대표자명"
     ws["A2"].font = HEADER_FONT
     ws["A2"].alignment = CENTER
-    ws[CEO_CELL] = "대표자명 입력"
+    ws[CEO_CELL] = ceo_name or "대표자명 입력"
     ws[CEO_CELL].font = INPUT_FONT
     ws[CEO_CELL].fill = INPUT_FILL
     ws[CEO_CELL].alignment = Alignment(horizontal="center")
@@ -231,12 +231,12 @@ def build_block(ws, start_row, seq, vendor_row):
     return r + BLOCK_HEIGHT, subtotal_row
 
 
-def build_report3(df, grand_total, out_path):
+def build_report3(df, grand_total, out_path, date_str=None, ceo_name=None):
     wb = Workbook()
     ws = wb.active
     ws.title = "세금계산서 요청"
 
-    write_input_header(ws)
+    write_input_header(ws, date_str, ceo_name)
 
     widths = [5, 22, 6, 11, 11, 9, 11, 12]
     for i, w in enumerate(widths, start=1):
@@ -260,5 +260,7 @@ def build_report3(df, grand_total, out_path):
 
 if __name__ == "__main__":
     src, out = sys.argv[1], sys.argv[2]
+    date_str = sys.argv[3] if len(sys.argv) > 3 else None
+    ceo_name = sys.argv[4] if len(sys.argv) > 4 else None
     df, grand_total = load_report1(src)
-    build_report3(df, grand_total, out)
+    build_report3(df, grand_total, out, date_str, ceo_name)
