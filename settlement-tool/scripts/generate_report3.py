@@ -82,7 +82,7 @@ def write_input_header(ws, date_str=None, ceo_name=None):
     ws["A2"] = "직매장 대표자명"
     ws["A2"].font = HEADER_FONT
     ws["A2"].alignment = CENTER
-    ws[CEO_CELL] = ceo_name or "대표자명 입력"
+    ws[CEO_CELL] = ceo_name or "김건영"
     ws[CEO_CELL].font = INPUT_FONT
     ws[CEO_CELL].fill = INPUT_FILL
     ws[CEO_CELL].alignment = Alignment(horizontal="center")
