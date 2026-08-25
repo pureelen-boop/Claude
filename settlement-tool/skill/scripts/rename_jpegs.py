@@ -25,8 +25,15 @@ import pandas as pd
 
 SOURCE_SHEET = "수수료매출내역(거래처별)"
 MATCH_FIELDS = ["면세지급액", "과세공급가액", "부가세", "과세지급액", "총지급예정액계", "순매출금액", "매출수수료"]
+NAME_FIELD = "업체명(텍스트 언급)"
 FOOTER_RE = re.compile(r"공급자\s*\(?\s*출\s*하\s*자\s*\)?\s*[:：]?\s*(.+?)\s*\(?\s*인\s*\)?\s*$")
 NUM_RE = re.compile(r"\d[\d,]{2,}")
+# 업체 상호에 흔히 붙는 법인 형태 표현. 예를 들어 전산원본엔 "로움에스농업회사법인
+# 유한회사(파파스컷)"로 등록돼 있어도, 출하내역서 위에는 "로움에스농업회사법인"까지만
+# (풋터가 잘리거나 상품명에 그렇게) 찍혀 있는 경우가 있다. 이런 접두/접미 법인
+# 표현과 괄호 안 내용을 떼어내고 남는 "핵심 상호"로 비교해야 실제로 매칭된다.
+CORP_SUFFIXES = ["주식회사", "유한회사", "합자회사", "합명회사", "영농조합법인", "농업회사법인", "협동조합"]
+PAREN_RE = re.compile(r"\([^)]*\)")
 # 출하내역서 상단 "매출기간 : 2026년07월01일 ~ 2026년07월31일" 문구에서
 # 종료일을 뽑는다. --date를 안 주면 이 종료일을 작성일자로 자동 사용한다.
 DATE_RANGE_RE = re.compile(
@@ -105,6 +112,15 @@ def extract_end_date(text):
     return int(m.group(5)), int(m.group(6))
 
 
+def core_name(name):
+    """상호에서 괄호 안 내용과 법인 형태 표현을 떼어낸 "핵심 상호".
+    "로움에스농업회사법인 유한회사(파파스컷)" -> "로움에스", "주식회사매일봄" -> "매일봄"."""
+    n = PAREN_RE.sub("", name)
+    for suf in CORP_SUFFIXES:
+        n = n.replace(suf, "")
+    return n.strip()
+
+
 def extract_numbers(text):
     nums = set()
     for m in NUM_RE.finditer(text):
@@ -115,10 +131,17 @@ def extract_numbers(text):
     return nums
 
 
-def match_vendor(ocr_numbers, vendors):
+def match_vendor(ocr_numbers, vendors, text):
     scored = []
     for v in vendors:
         fields = [f for f in MATCH_FIELDS if v[f] and v[f] in ocr_numbers]
+        # 업체명(또는 핵심 상호)이 이미지 어디에든 그대로 적혀 있으면(풋터
+        # 서명란뿐 아니라 상품명 줄에도 - 예: "매일봄" 브랜드 상품) 이것도
+        # 하나의 매칭 항목으로 센다. 금액이 우연히 겹쳐도 이름이 안 겹치면
+        # 걸러내는 안전장치 역할도 겸한다 (classify()의 상충 검사 참고).
+        core = core_name(v["name"])
+        if core and len(core) >= 2 and core in text:
+            fields.append(NAME_FIELD)
         if fields:
             scored.append({"vendor": v["name"], "seq": v["seq"], "count": len(fields), "fields": fields})
     scored.sort(key=lambda s: -s["count"])
@@ -129,10 +152,28 @@ def classify(ocr_name, scored):
     """(업체명, seq, 확정여부, 근거) 반환. 업체를 못 정하면 seq는 None."""
     if scored and scored[0]["count"] >= 3 and (len(scored) == 1 or scored[1]["count"] < scored[0]["count"]):
         s = scored[0]
+        # 금액만으로 3개 이상 맞아떨어져도, 정작 이 업체 이름은 이미지 어디에도
+        # 안 보이는데 다른 업체 이름은 보인다면 - 숫자가 우연히 겹쳤을 위험
+        # 신호다. 실제로 "로움에스"(정육) 스캔이 순전히 숫자만으로 "스퀴즈"로
+        # 잘못 확정된 사례가 있어서 추가한 안전장치. 이럴 땐 확정하지 않는다.
+        if NAME_FIELD not in s["fields"]:
+            conflicting = [x for x in scored if x is not s and NAME_FIELD in x["fields"]]
+            if conflicting:
+                c = conflicting[0]
+                return s["vendor"], s["seq"], False, (
+                    f"금액은 '{s['vendor']}'와 일치({s['count']}개)하지만 "
+                    f"이미지엔 '{c['vendor']}'라는 이름이 보여 상충 — 확인 필요"
+                )
         return s["vendor"], s["seq"], True, "·".join(s["fields"]) + f" 일치 ({s['count']}개)"
     if len(scored) > 1 and scored[1]["count"] == scored[0]["count"]:
-        tied = [s["vendor"] for s in scored if s["count"] == scored[0]["count"]]
-        return scored[0]["vendor"], scored[0]["seq"], False, " / ".join(tied) + f" 중 어디인지 애매함 (각 {scored[0]['count']}개 항목 일치)"
+        tied = [s for s in scored if s["count"] == scored[0]["count"]]
+        # 동점이어도 그중 이름까지 일치하는 후보가 단 하나뿐이면 그걸로 정한다.
+        name_tied = [s for s in tied if NAME_FIELD in s["fields"]]
+        if len(name_tied) == 1:
+            s = name_tied[0]
+            return s["vendor"], s["seq"], True, "·".join(s["fields"]) + f" 일치 ({s['count']}개, 동점 후보 중 이름으로 확정)"
+        tied_names = [s["vendor"] for s in tied]
+        return scored[0]["vendor"], scored[0]["seq"], False, " / ".join(tied_names) + f" 중 어디인지 애매함 (각 {scored[0]['count']}개 항목 일치)"
     if scored:
         s = scored[0]
         return s["vendor"], s["seq"], False, f"'{s['vendor']}'로 추정 ({'·'.join(s['fields'])}만 일치, {s['count']}개뿐)"
@@ -169,7 +210,7 @@ def main(xls_path, zip_path, out_zip_path, date_str=None):
             text = ocr_text(src)
             ocr_name = extract_footer_name(text)
             numbers = extract_numbers(text)
-            scored = match_vendor(numbers, vendors)
+            scored = match_vendor(numbers, vendors, text)
             vendor, seq, confirmed, reason = classify(ocr_name, scored)
             recognized.append({
                 "order": i, "src": src, "orig_base": orig_base,

@@ -883,11 +883,26 @@ window.__KOR_B64="H4sICDg381wAA2tvci50cmFpbmVkZGF0YQDE/YWXJMeRB44XdzUzw/RMDzPtLG
   // ==================== JPEG 파일명 매칭 (OCR) ====================
 
   var MATCH_FIELDS = ["면세지급액", "과세공급가액", "부가세", "과세지급액", "총지급예정액계", "순매출금액", "매출수수료"];
+  var NAME_FIELD = "업체명(텍스트 언급)";
   var FOOTER_RE = /공급자\s*\(?\s*출\s*하\s*자\s*\)?\s*[:：]?\s*(.+?)\s*\(?\s*인\s*\)?\s*$/;
   var NUM_RE = /\d[\d,]{2,}/g;
   // 출하내역서 상단 "매출기간 : 2026년07월01일 ~ 2026년07월31일"에서 종료일을
   // 뽑는다 — 작성일자를 사용자가 안 채웠으면 이 값으로 자동 채운다.
   var DATE_RANGE_RE = /(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*~\s*(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/;
+  // 업체 상호에 흔히 붙는 법인 형태 표현. 전산원본엔 "로움에스농업회사법인
+  // 유한회사(파파스컷)"로 등록돼 있어도 출하내역서엔 "로움에스농업회사법인"까지만
+  // (또는 상품명에 "매일봄"처럼 핵심 부분만) 찍혀 있는 경우가 있어서, 법인
+  // 표현·괄호 내용을 뗀 "핵심 상호"로 비교해야 실제로 매칭된다.
+  var CORP_SUFFIXES = ["주식회사", "유한회사", "합자회사", "합명회사", "영농조합법인", "농업회사법인", "협동조합"];
+  var PAREN_RE = /\([^)]*\)/g;
+
+  function coreName(name) {
+    var n = name.replace(PAREN_RE, "");
+    for (var i = 0; i < CORP_SUFFIXES.length; i++) {
+      n = n.split(CORP_SUFFIXES[i]).join("");
+    }
+    return n.trim();
+  }
 
   var zipDropzone = document.getElementById("zipDropzone");
   var zipInput = document.getElementById("zipInput");
@@ -1004,7 +1019,7 @@ window.__KOR_B64="H4sICDg381wAA2tvci50cmFpbmVkZGF0YQDE/YWXJMeRB44XdzUzw/RMDzPtLG
     return nums;
   }
 
-  function matchVendor(ocrNumbers) {
+  function matchVendor(ocrNumbers, text) {
     var best = [];
     for (var i = 0; i < report3Rows.length; i++) {
       var r = report3Rows[i];
@@ -1013,6 +1028,11 @@ window.__KOR_B64="H4sICDg381wAA2tvci50cmFpbmVkZGF0YQDE/YWXJMeRB44XdzUzw/RMDzPtLG
         var val = r[MATCH_FIELDS[f]];
         if (val && ocrNumbers[val]) fields.push(MATCH_FIELDS[f]);
       }
+      // 업체명(핵심 상호)이 이미지 어디에든 그대로 적혀 있으면(풋터뿐 아니라
+      // 상품명 줄에도 - 예: "매일봄" 브랜드 상품) 매칭 항목으로 센다. 금액이
+      // 우연히 겹쳐도 이름이 안 겹치면 걸러내는 안전장치도 겸한다.
+      var core = coreName(r.거래처명);
+      if (core && core.length >= 2 && text.indexOf(core) !== -1) fields.push(NAME_FIELD);
       if (fields.length > 0) best.push({ vendor: r.거래처명, count: fields.length, fields: fields });
     }
     best.sort(function (a, b) { return b.count - a.count; });
@@ -1114,22 +1134,49 @@ window.__KOR_B64="H4sICDg381wAA2tvci50cmFpbmVkZGF0YQDE/YWXJMeRB44XdzUzw/RMDzPtLG
         result.ocrName = extractFooterName(text);
         result.dateDetected = extractEndDate(text);
         var numbers = extractNumbers(text);
-        var scored = matchVendor(numbers);
+        var scored = matchVendor(numbers, text);
         var tie = scored.length > 1 && scored[1].count === scored[0].count;
 
         if (scored.length && scored[0].count >= 3 && !tie) {
-          result.matchedVendor = scored[0].vendor;
-          result.fieldCount = scored[0].count;
-          result.confirmed = true;
-          result.reason = scored[0].fields.join("·") + " 일치 (" + scored[0].count + "개)";
+          var top = scored[0];
+          // 금액만으로 3개 이상 맞아떨어져도, 정작 이 업체 이름은 이미지
+          // 어디에도 안 보이는데 다른 업체 이름은 보인다면 - 숫자가 우연히
+          // 겹쳤을 위험 신호다(실제로 "로움에스"(정육) 스캔이 순전히 숫자만
+          // 으로 "스퀴즈"로 잘못 확정된 사례가 있었다). 이럴 땐 확정하지 않는다.
+          var conflict = null;
+          if (top.fields.indexOf(NAME_FIELD) === -1) {
+            conflict = scored.find(function (s) { return s !== top && s.fields.indexOf(NAME_FIELD) !== -1; });
+          }
+          if (conflict) {
+            result.matchedVendor = top.vendor;
+            result.fieldCount = top.count;
+            result.confirmed = false;
+            result.reason = "금액은 '" + top.vendor + "'와 일치(" + top.count + "개)하지만 이미지엔 '" +
+              conflict.vendor + "'라는 이름이 보여 상충 — 확인 필요";
+          } else {
+            result.matchedVendor = top.vendor;
+            result.fieldCount = top.count;
+            result.confirmed = true;
+            result.reason = top.fields.join("·") + " 일치 (" + top.count + "개)";
+          }
         } else if (tie) {
-          // 여러 업체가 동점 - 어느 쪽인지 기계적으로 못 정하니 후보를 그대로 보여준다
-          var tiedNames = scored.filter(function (s) { return s.count === scored[0].count; })
-            .map(function (s) { return s.vendor; });
-          result.matchedVendor = scored[0].vendor;
-          result.fieldCount = scored[0].count;
-          result.confirmed = false;
-          result.reason = tiedNames.join(" / ") + " 중 어디인지 애매해요 (각 " + scored[0].count + "개 항목 일치) — 이미지로 확인해주세요.";
+          // 여러 업체가 동점 - 그중 이름까지 일치하는 후보가 단 하나뿐이면 그걸로 정한다
+          var tiedGroup = scored.filter(function (s) { return s.count === scored[0].count; });
+          var nameTied = tiedGroup.filter(function (s) { return s.fields.indexOf(NAME_FIELD) !== -1; });
+          if (nameTied.length === 1) {
+            var winner = nameTied[0];
+            result.matchedVendor = winner.vendor;
+            result.fieldCount = winner.count;
+            result.confirmed = true;
+            result.reason = winner.fields.join("·") + " 일치 (" + winner.count + "개, 동점 후보 중 이름으로 확정)";
+          } else {
+            // 어느 쪽인지 기계적으로 못 정하니 후보를 그대로 보여준다
+            var tiedNames = tiedGroup.map(function (s) { return s.vendor; });
+            result.matchedVendor = scored[0].vendor;
+            result.fieldCount = scored[0].count;
+            result.confirmed = false;
+            result.reason = tiedNames.join(" / ") + " 중 어디인지 애매해요 (각 " + scored[0].count + "개 항목 일치) — 이미지로 확인해주세요.";
+          }
         } else if (scored.length) {
           // 약한 매칭(1~2개 항목) - 확인 필요로 표시하되 후보는 보여줌
           result.matchedVendor = scored[0].vendor;
