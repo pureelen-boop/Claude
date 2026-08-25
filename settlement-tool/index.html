@@ -956,12 +956,12 @@ window.__KOR_B64="H4sICDg381wAA2tvci50cmFpbmVkZGF0YQDE/YWXJMeRB44XdzUzw/RMDzPtLG
     var best = [];
     for (var i = 0; i < report3Rows.length; i++) {
       var r = report3Rows[i];
-      var count = 0;
+      var fields = [];
       for (var f = 0; f < MATCH_FIELDS.length; f++) {
         var val = r[MATCH_FIELDS[f]];
-        if (val && ocrNumbers[val]) count++;
+        if (val && ocrNumbers[val]) fields.push(MATCH_FIELDS[f]);
       }
-      if (count > 0) best.push({ vendor: r.거래처명, count: count });
+      if (fields.length > 0) best.push({ vendor: r.거래처명, count: fields.length, fields: fields });
     }
     best.sort(function (a, b) { return b.count - a.count; });
     return best;
@@ -979,13 +979,12 @@ window.__KOR_B64="H4sICDg381wAA2tvci50cmFpbmVkZGF0YQDE/YWXJMeRB44XdzUzw/RMDzPtLG
       var badge = r.confirmed
         ? '<span class="badge ok">확정</span>'
         : '<span class="badge warn">확인 필요</span>';
-      var evidence = r.fieldCount > 0 ? r.fieldCount + "개 항목 일치" : (r.ocrName ? "이름: " + escapeHtml(r.ocrName) : "인식 안 됨");
       html +=
         "<tr>" +
         '<td style="text-align:left;">' + escapeHtml(r.origName) + "</td>" +
         '<td style="text-align:left;">' + escapeHtml(r.saveName || "(미확정)") + "</td>" +
         '<td class="confirm-badge">' + badge + "</td>" +
-        '<td style="text-align:left;font-size:12px;color:var(--text-dim);">' + escapeHtml(evidence) + "</td>" +
+        '<td style="text-align:left;font-size:12px;color:var(--text-dim);max-width:260px;">' + escapeHtml(r.reason || "") + "</td>" +
         '<td class="confirm-badge"><button class="jpeg-row-btn" data-idx="' + idx + '">저장</button></td>' +
         "</tr>";
     });
@@ -1041,26 +1040,42 @@ window.__KOR_B64="H4sICDg381wAA2tvci50cmFpbmVkZGF0YQDE/YWXJMeRB44XdzUzw/RMDzPtLG
       var blob = await entries[i].async("blob");
       var origName = entries[i].name.split("/").pop();
 
-      var result = { origName: origName, blob: blob, matchedVendor: null, fieldCount: 0, ocrName: null, confirmed: false, saveName: null };
+      var result = { origName: origName, blob: blob, matchedVendor: null, fieldCount: 0, ocrName: null, confirmed: false, saveName: null, reason: "" };
       try {
         var { data } = await worker.recognize(blob);
         var text = data.text || "";
         result.ocrName = extractFooterName(text);
         var numbers = extractNumbers(text);
         var scored = matchVendor(numbers);
+        var tie = scored.length > 1 && scored[1].count === scored[0].count;
 
-        if (scored.length && scored[0].count >= 3 && (scored.length === 1 || scored[1].count < scored[0].count)) {
+        if (scored.length && scored[0].count >= 3 && !tie) {
           result.matchedVendor = scored[0].vendor;
           result.fieldCount = scored[0].count;
           result.confirmed = true;
-        } else if (scored.length && (scored.length === 1 || scored[1].count < scored[0].count)) {
+          result.reason = scored[0].fields.join("·") + " 일치 (" + scored[0].count + "개)";
+        } else if (tie) {
+          // 여러 업체가 동점 - 어느 쪽인지 기계적으로 못 정하니 후보를 그대로 보여준다
+          var tiedNames = scored.filter(function (s) { return s.count === scored[0].count; })
+            .map(function (s) { return s.vendor; });
+          result.matchedVendor = scored[0].vendor;
+          result.fieldCount = scored[0].count;
+          result.confirmed = false;
+          result.reason = tiedNames.join(" / ") + " 중 어디인지 애매해요 (각 " + scored[0].count + "개 항목 일치) — 이미지로 확인해주세요.";
+        } else if (scored.length) {
           // 약한 매칭(1~2개 항목) - 확인 필요로 표시하되 후보는 보여줌
           result.matchedVendor = scored[0].vendor;
           result.fieldCount = scored[0].count;
           result.confirmed = false;
+          result.reason = "'" + scored[0].vendor + "'로 추정 (" + scored[0].fields.join("·") + "만 일치, " + scored[0].count + "개뿐) — 이미지로 확인해주세요.";
+        } else if (result.ocrName) {
+          result.reason = "이름은 '" + result.ocrName + "'로 읽혔지만 일치하는 금액이 없어요 — 이미지로 확인해주세요.";
+        } else {
+          result.reason = "글자를 거의 읽지 못했어요 (스캔 상태 확인 필요) — 이미지로 확인해주세요.";
         }
       } catch (e) {
         result.ocrName = "(인식 오류)";
+        result.reason = "OCR 처리 중 오류가 났어요: " + e.message;
       }
 
       if (result.confirmed && result.matchedVendor) {
